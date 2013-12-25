@@ -25,46 +25,58 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.UnknownHostException;
+import java.util.List;
+import java.util.ArrayList;
 
 public class TcpAddress implements Address.IZAddress {
 
+    private final int APROX_ADDRESSES_FOR_DNS_ENTRY = 5;
+
     public static class TcpAddressMask extends TcpAddress {
         public boolean match_address(SocketAddress addr_) {
-            return address.equals(addr_); 
+            return addresses.contains(addr_);
         }
     }
 
-    protected InetSocketAddress address;
-    
+    protected List<InetSocketAddress> addresses = new ArrayList<InetSocketAddress>(APROX_ADDRESSES_FOR_DNS_ENTRY);
+
     public TcpAddress(String addr_) {
         resolve(addr_, false);
     }
     public TcpAddress() {
     }
-    
+
     @Override
     public String toString() {
-        if (address == null) {
+        if (addresses.isEmpty()) {
             return "";
         }
-        
-        if (address.getAddress() instanceof Inet6Address) {
-            return "tcp://[" + address.getAddress().getHostAddress() + "]:" + address.getPort();
-        } else {
-            return "tcp://" + address.getAddress().getHostAddress() + ":" + address.getPort();
+
+        StringBuilder response = new StringBuilder(100);
+        for (InetSocketAddress address: addresses) {
+            if (address.getAddress() instanceof Inet6Address) {
+                response.append("\ntcp://[" + address.getAddress().getHostAddress() + "]:" + address.getPort());
+            } else {
+                response.append("\ntcp://" + address.getAddress().getHostAddress() + ":" + address.getPort());
+            }
         }
-        
+        return response.toString().substring(1);
     }
-    
+
     public int getPort(){
-        if (address != null)
-            return address.getPort();
+        if (!addresses.isEmpty())
+            return addresses.get(0).getPort();
         return -1;
     }
 
     //Used after binding to ephemeral port to update ephemeral port (0) to actual port
     protected void updatePort(int port){
-        address = new InetSocketAddress(address.getAddress(), port);
+        List<InetSocketAddress> updatedAddresses = new ArrayList<InetSocketAddress>(addresses.size());
+        for(InetSocketAddress isa: addresses) {
+            InetSocketAddress updated = new InetSocketAddress(isa.getAddress(), port);
+            updatedAddresses.add(updated);
+        }
+        addresses = updatedAddresses;
     }
 
     @Override
@@ -76,9 +88,9 @@ public class TcpAddress implements Address.IZAddress {
         }
 
         //  Separate the address/port.
-        String addr_str = name_.substring(0, delimiter); 
+        String addr_str = name_.substring(0, delimiter);
         String port_str = name_.substring(delimiter+1);
-        
+
         //  Remove square brackets around the address, if any.
         if (addr_str.length () >= 2 && addr_str.charAt(0) == '[' &&
               addr_str.charAt(addr_str.length () - 1) == ']')
@@ -97,7 +109,7 @@ public class TcpAddress implements Address.IZAddress {
             }
         }
 
-        InetAddress addr_net = null;
+        List<InetAddress> resolved = new ArrayList<InetAddress>(APROX_ADDRESSES_FOR_DNS_ENTRY);
 
         if (addr_str.equals("*")) {
             addr_str = "0.0.0.0";
@@ -107,24 +119,26 @@ public class TcpAddress implements Address.IZAddress {
                 if (ipv4only_ && (ia instanceof Inet6Address)) {
                     continue;
                 }
-                addr_net = ia;
+                resolved.add(ia);
                 break;
             }
         } catch (UnknownHostException e) {
             throw new IllegalArgumentException(e);
         }
-        
-        if (addr_net == null) {
+
+        if (resolved.isEmpty()) {
             throw new IllegalArgumentException(name_);
         }
 
-        address = new InetSocketAddress(addr_net, port);
-
+        for (InetAddress ina: resolved) {
+            InetSocketAddress isa = new InetSocketAddress(ina, port);
+            addresses.add(isa);
+        }
     }
 
     @Override
     public SocketAddress address() {
-        return address;
+        return addresses.get(0);
     }
 
 }
