@@ -1,27 +1,29 @@
-/*      
+/*
     Copyright (c) 2010-2011 250bpm s.r.o.
     Copyright (c) 2011 VMware, Inc.
     Copyright (c) 2010-2011 Other contributors as noted in the AUTHORS file
-        
+
     This file is part of 0MQ.
 
     0MQ is free software; you can redistribute it and/or modify it under
     the terms of the GNU Lesser General Public License as published by
     the Free Software Foundation; either version 3 of the License, or
     (at your option) any later version.
-        
+
     0MQ is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU Lesser General Public License for more details.
-        
+
     You should have received a copy of the GNU Lesser General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/ 
+*/
 package zmq;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class XPub extends SocketBase {
 
@@ -40,6 +42,8 @@ public class XPub extends SocketBase {
     //  Distributor of messages holding the list of outbound pipes.
     private final Dist dist;
 
+    private final Logger log = LoggerFactory.getLogger(XPub.class);
+
     // If true, send all subscription messages upstream, not just
     // unique ones
     boolean verbose;
@@ -51,10 +55,10 @@ public class XPub extends SocketBase {
     //  applied to the trie, but not yet received by the user.
     private final Deque<Blob> pending_data;
     private final Deque<Integer> pending_flags;
-    
+
     private static Mtrie.IMtrieHandler mark_as_matching;
     private static Mtrie.IMtrieHandler send_unsubscription;
-    
+
     static {
         mark_as_matching = new Mtrie.IMtrieHandler() {
 
@@ -63,11 +67,11 @@ public class XPub extends SocketBase {
                 XPub self = (XPub) arg_;
                 self.dist.match (pipe_);
             }
-            
+
         };
-        
+
         send_unsubscription = new Mtrie.IMtrieHandler() {
-            
+
             @Override
             public void invoke(Pipe pipe_, byte[] data_, int size, Object arg_) {
                 XPub self = (XPub) arg_;
@@ -84,20 +88,20 @@ public class XPub extends SocketBase {
             }
         };
     }
-    
+
     public XPub(Ctx parent_, int tid_, int sid_) {
         super (parent_, tid_, sid_);
-        
+
         options.type = ZMQ.ZMQ_XPUB;
         verbose = false;
         more = false;
-        
+
         subscriptions = new Mtrie();
         dist = new Dist();
         pending_data = new ArrayDeque<Blob>();
         pending_flags = new ArrayDeque<Integer>();
     }
-    
+
     @Override
     protected void xattach_pipe (Pipe pipe_, boolean icanhasall_)
     {
@@ -121,15 +125,26 @@ public class XPub extends SocketBase {
         Msg sub = null;
         while ((sub = pipe_.read()) != null) {
 
+            if (log.isDebugEnabled()) {
+                log.debug("new subscription message found {}", sub.toString());
+            }
+
             //  Apply the subscription to the trie
             byte[] data = sub.data();
             int size = sub.size ();
             if (size > 0 && (data[0] == 0 || data[0] == 1)) {
                 boolean unique;
-                if (data[0] == 0)
+                if (data[0] == 0) {
+                    if (log.isDebugEnabled()) {
+                        log.debug("received subscription cancellation, message {}", data);
+                    }
                     unique = subscriptions.rm (data , 1, pipe_);
-                else
+                } else {
+                    if (log.isDebugEnabled()) {
+                        log.debug("received new subscription, message {}", data);
+                    }
                     unique = subscriptions.add (data , 1, pipe_);
+                }
 
                 //  If the subscription is not a duplicate, store it so that it can be
                 //  passed to used on next recv call. (Unsubscribe is not verbose.)
@@ -144,7 +159,7 @@ public class XPub extends SocketBase {
             }
         }
     }
-    
+
     @Override
     protected void xwrite_activated (Pipe pipe_)
     {
@@ -168,8 +183,8 @@ public class XPub extends SocketBase {
         //  Remove the pipe from the trie. If there are topics that nobody
         //  is interested in anymore, send corresponding unsubscriptions
         //  upstream.
-        
-        
+
+
         subscriptions.rm (pipe_, send_unsubscription, this);
 
         dist.terminated (pipe_);
@@ -179,7 +194,7 @@ public class XPub extends SocketBase {
 
     @Override
     protected boolean xsend(Msg msg_) {
-        boolean msg_more = msg_.hasMore(); 
+        boolean msg_more = msg_.hasMore();
 
         //  For the first part of multi-part message, find the matching pipes.
         if (!more)
@@ -200,15 +215,15 @@ public class XPub extends SocketBase {
         more = msg_more;
         return true;
     }
-    
+
     @Override
     protected boolean xhas_out() {
         return dist.has_out ();
     }
-    
+
     @Override
     protected Msg xrecv() {
-        //  If there is at least one 
+        //  If there is at least one
         if (pending_data.isEmpty ()) {
             errno.set(ZError.EAGAIN);
             return null;
@@ -220,7 +235,7 @@ public class XPub extends SocketBase {
         msg.setFlags(flags);
         return msg;
     }
-    
+
     @Override
     protected boolean xhas_in() {
         return !pending_data.isEmpty ();

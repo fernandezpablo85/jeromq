@@ -21,11 +21,15 @@
 */
 
 package zmq;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 //  Note that pipe can be stored in three different arrays.
 //  The array of inbound pipes (1), the array of outbound pipes (2) and
 //  the generic array of pipes to deallocate (3).
 public class Pipe extends ZObject {
+
+    private final Logger log = LoggerFactory.getLogger(Pipe.class);
 
     public interface IPipeEvents {
 
@@ -33,7 +37,7 @@ public class Pipe extends ZObject {
         void write_activated(Pipe pipe);
         void hiccuped(Pipe pipe);
         void terminated(Pipe pipe);
-        
+
 
     }
     //  Underlying pipes for both directions.
@@ -63,7 +67,7 @@ public class Pipe extends ZObject {
 
     //  Sink to send events to.
     private IPipeEvents sink;
-    
+
     //  State of the pipe endpoint. Active is common state before any
     //  termination begins. Delimited means that delimiter was read from
     //  pipe before term command was received. Pending means that term
@@ -90,10 +94,10 @@ public class Pipe extends ZObject {
 
     //  Identity of the writer. Used uniquely by the reader side.
     private Blob identity;
-    
+
     // JeroMQ only
     private ZObject parent;
-    
+
     //  Constructor is private. Pipe can only be created using
     //  pipepair function.
 	private Pipe (ZObject parent_, YPipe<Msg> inpipe_, YPipe<Msg> outpipe_,
@@ -112,10 +116,10 @@ public class Pipe extends ZObject {
 		sink = null ;
 		state = State.ACTIVE;
 		delay = delay_;
-		
+
 		parent = parent_;
 	}
-	
+
 	//  Create a pipepair for bi-directional transfer of messages.
     //  First HWM is for messages passed from first pipe to the second pipe.
     //  Second HWM is for messages passed from second pipe to the first pipe.
@@ -124,23 +128,23 @@ public class Pipe extends ZObject {
     //  terminates straight away.
 	public static void pipepair(ZObject[] parents_, Pipe[] pipes_, int[] hwms_,
 			boolean[] delays_) {
-		
+
 	    //   Creates two pipe objects. These objects are connected by two ypipes,
 	    //   each to pass messages in one direction.
-	            
+
 		YPipe<Msg> upipe1 = new YPipe<Msg>(Config.MESSAGE_PIPE_GRANULARITY.getValue());
 		YPipe<Msg> upipe2 = new YPipe<Msg>(Config.MESSAGE_PIPE_GRANULARITY.getValue());
-	            
+
 	    pipes_ [0] = new Pipe(parents_ [0], upipe1, upipe2,
 	        hwms_ [1], hwms_ [0], delays_ [0]);
 	    pipes_ [1] = new Pipe(parents_ [1], upipe2, upipe1,
 	        hwms_ [0], hwms_ [1], delays_ [1]);
-	            
+
 	    pipes_ [0].set_peer (pipes_ [1]);
 	    pipes_ [1].set_peer (pipes_ [0]);
 
 	}
-	
+
 	//  Pipepair uses this function to let us know about
     //  the peer pipe object.
     private void set_peer (Pipe peer_)
@@ -149,18 +153,18 @@ public class Pipe extends ZObject {
         assert (peer_ != null);
         peer = peer_;
     }
-    
+
     //  Specifies the object to send events to.
     public void set_event_sink(IPipeEvents sink_) {
         assert (sink == null);
         sink = sink_;
     }
-    
+
     //  Pipe endpoint can store an opaque ID to be used by its clients.
     public void set_identity(Blob identity_) {
         identity = identity_;
     }
-    
+
     public Blob get_identity() {
         return identity;
     }
@@ -188,7 +192,7 @@ public class Pipe extends ZObject {
 
         return true;
     }
-    
+
 
     //  Reads a message to the underlying pipe.
     public Msg read()
@@ -217,7 +221,7 @@ public class Pipe extends ZObject {
 
         return msg_;
     }
-    
+
     //  Checks whether messages can be written to the pipe. If writing
     //  the message would cause high watermark the function returns false.
     public boolean check_write ()
@@ -229,6 +233,7 @@ public class Pipe extends ZObject {
 
         if (full) {
             out_active = false;
+            log.warn(String.format("high watermark (%s) reached. Messages written: (%s), peer messages read: (%s)", hwm, msgs_written, peers_msgs_read));
             return false;
         }
 
@@ -264,7 +269,7 @@ public class Pipe extends ZObject {
             }
         }
     }
-    
+
     //  Flush the messages downsteam.
     public void flush ()
     {
@@ -274,7 +279,7 @@ public class Pipe extends ZObject {
 
         if (outpipe != null && !outpipe.flush ()) {
             send_activate_read (peer);
-        } 
+        }
     }
 
 
@@ -298,7 +303,7 @@ public class Pipe extends ZObject {
             sink.write_activated (this);
         }
     }
-    
+
     @SuppressWarnings("unchecked")
     @Override
     protected void process_hiccup (Object pipe_) {
@@ -318,7 +323,7 @@ public class Pipe extends ZObject {
         if (state == State.ACTIVE)
             sink.hiccuped (this);
     }
-    
+
     @Override
     protected void process_pipe_term ()
     {
@@ -360,7 +365,7 @@ public class Pipe extends ZObject {
         //  pipe_term is invalid in other states.
         assert (false);
     }
-    
+
     @Override
     protected void process_pipe_term_ack ()
     {
@@ -386,7 +391,7 @@ public class Pipe extends ZObject {
         //  the ypipe itself.
         while (inpipe.read () != null) {
         }
-        
+
         inpipe = null;
 
         //  Deallocate the pipe object
@@ -451,15 +456,15 @@ public class Pipe extends ZObject {
 
             //  Write the delimiter into the pipe. Note that watermarks are not
             //  checked; thus the delimiter can be written even when the pipe is full.
-            
+
             Msg msg = new Msg();
             msg.initDelimiter ();
             outpipe.write (msg, false);
             flush ();
-            
+
         }
     }
-    
+
 
     //  Returns true if the message is delimiter; false otherwise.
     private static boolean is_delimiter(Msg msg_) {
@@ -494,7 +499,7 @@ public class Pipe extends ZObject {
 
 	    return result;
 	}
-	
+
 
     //  Handler for delimiter read from the pipe.
 	private void delimit ()
@@ -515,7 +520,7 @@ public class Pipe extends ZObject {
 	    assert (false);
 	}
 
- 
+
     //  Temporaraily disconnects the inbound message stream and drops
     //  all the messages on the fly. Causes 'hiccuped' event to be generated
     //  in the peer.

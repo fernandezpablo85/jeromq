@@ -25,6 +25,8 @@ import java.net.ConnectException;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.nio.channels.SocketChannel;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 //  If 'delay' is true connecter first waits for a while, then starts
 //  connection process.
@@ -37,6 +39,8 @@ public class TcpConnecter extends Own implements IPollEvents {
 
     //  Address to connect to. Owned by session_base_t.
     private final Address addr;
+
+    private final Logger log = LoggerFactory.getLogger(TcpConnecter.class);
 
     //  Underlying socket.
     private SocketChannel handle;
@@ -201,7 +205,7 @@ public class TcpConnecter extends Own implements IPollEvents {
     private void start_connecting ()
     {
         //  Open the connecting socket.
-
+        log.debug("connecting to " + address.toString());
         try {
             boolean rc = open ();
 
@@ -221,6 +225,7 @@ public class TcpConnecter extends Own implements IPollEvents {
             }
         } catch (IOException e) {
             //  Handle any other error condition by eventual reconnect.
+            log.error("error while connecting to " + address.toString(), e);
             if (handle != null)
                 close ();
             add_reconnect_timer();
